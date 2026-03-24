@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import ccxt
 import pandas as pd
-import yfinance as yf
 
 
 class ExchangeClient:
@@ -10,6 +8,12 @@ class ExchangeClient:
         self.source = source
         self.exchange = None
         if self.source == "binance":
+            try:
+                import ccxt
+            except Exception as exc:
+                raise RuntimeError(
+                    "Binance mode requires 'ccxt'. Install it with: pip install ccxt"
+                ) from exc
             params = {"enableRateLimit": True}
             if api_key and api_secret:
                 params.update({"apiKey": api_key, "secret": api_secret})
@@ -21,6 +25,13 @@ class ExchangeClient:
             df = pd.DataFrame(raw, columns=["timestamp", "open", "high", "low", "close", "volume"])
             df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
             return df
+
+        try:
+            import yfinance as yf
+        except Exception as exc:
+            raise RuntimeError(
+                "Yahoo Finance mode requires 'yfinance'. Install it with: pip install yfinance"
+            ) from exc
 
         interval = self._to_yf_interval(timeframe)
         period = self._yf_period_for_interval(interval)
