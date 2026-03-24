@@ -24,7 +24,7 @@ class ExchangeClient:
 
         interval = self._to_yf_interval(timeframe)
         period = self._yf_period_for_interval(interval)
-        hist = yf.Ticker(symbol).history(period=period, interval=interval)
+        hist = yf.Ticker(symbol).history(period=period, interval=interval, timeout=10)
         if hist.empty:
             raise ValueError(f"No market data found for symbol '{symbol}' with interval '{interval}'")
         hist = hist.reset_index().tail(limit)

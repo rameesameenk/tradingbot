@@ -99,21 +99,32 @@ if run_step:
     except Exception as exc:
         st.error(f"Step failed: {exc}")
 elif refresh_data or st.session_state.preview_df is None or st.session_state.preview_key != preview_key:
-    try:
-        preview = fetch_preview_cached(
-            source=runtime_cfg.data_source,
-            symbol=runtime_cfg.symbol,
-            timeframe=runtime_cfg.timeframe,
-            limit=max(100, runtime_cfg.slow_ma + 10),
-        ).copy()
-        st.session_state.preview_df = preview
-        st.session_state.preview_key = preview_key
-    except Exception as exc:
-        if "Too Many Requests" in str(exc):
-            st.warning("Provider rate-limited this request. Wait 1-2 minutes and click 'Refresh Data'.")
-        else:
-            st.error(f"Data fetch failed: {exc}")
+    should_fetch = refresh_data
+    if st.session_state.preview_df is None and not refresh_data:
+        st.info("Click 'Refresh Data' to load market candles.")
+        should_fetch = False
+    elif st.session_state.preview_key != preview_key and not refresh_data:
+        st.info("Settings changed. Click 'Refresh Data' to reload candles.")
+        should_fetch = False
+
+    if not should_fetch:
         preview = st.session_state.preview_df
+    else:
+        try:
+            preview = fetch_preview_cached(
+                source=runtime_cfg.data_source,
+                symbol=runtime_cfg.symbol,
+                timeframe=runtime_cfg.timeframe,
+                limit=max(100, runtime_cfg.slow_ma + 10),
+            ).copy()
+            st.session_state.preview_df = preview
+            st.session_state.preview_key = preview_key
+        except Exception as exc:
+            if "Too Many Requests" in str(exc):
+                st.warning("Provider rate-limited this request. Wait 1-2 minutes and click 'Refresh Data'.")
+            else:
+                st.error(f"Data fetch failed: {exc}")
+            preview = st.session_state.preview_df
 else:
     preview = st.session_state.preview_df
 
