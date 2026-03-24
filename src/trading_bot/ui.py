@@ -8,6 +8,12 @@ from trading_bot.engine import PaperPortfolio, TradingEngine
 from trading_bot.exchange import ExchangeClient
 
 
+@st.cache_data(ttl=90, show_spinner=False)
+def fetch_preview_cached(source: str, symbol: str, timeframe: str, limit: int) -> pd.DataFrame:
+    client = ExchangeClient(source=source)
+    return client.fetch_ohlcv(symbol=symbol, timeframe=timeframe, limit=limit)
+
+
 st.set_page_config(page_title="Trading Bot UI", layout="wide")
 st.title("Trading Bot Dashboard")
 
@@ -15,6 +21,10 @@ if "portfolio" not in st.session_state:
     st.session_state.portfolio = PaperPortfolio(initial_usdt=1000.0)
 if "trades" not in st.session_state:
     st.session_state.trades = []
+if "preview_df" not in st.session_state:
+    st.session_state.preview_df = None
+if "preview_key" not in st.session_state:
+    st.session_state.preview_key = None
 
 config = BotConfig()
 
@@ -43,6 +53,7 @@ with st.sidebar:
     slow_ma = st.number_input("Slow MA", min_value=3, max_value=200, value=config.slow_ma)
     poll_seconds = st.slider("Refresh seconds", min_value=5, max_value=60, value=config.poll_seconds)
     run_step = st.button("Run One Step")
+    refresh_data = st.button("Refresh Data")
 
 runtime_cfg = BotConfig(
     data_source=data_source,
@@ -65,10 +76,15 @@ except Exception as exc:
 
 client = ExchangeClient(source=runtime_cfg.data_source)
 engine = TradingEngine(config=runtime_cfg, portfolio=st.session_state.portfolio, client=client)
+preview = None
+preview_key = (runtime_cfg.data_source, runtime_cfg.symbol, runtime_cfg.timeframe, runtime_cfg.slow_ma)
 
 if run_step:
     try:
         result = engine.step()
+        preview = result["df"].copy()
+        st.session_state.preview_df = preview
+        st.session_state.preview_key = preview_key
         event = result["event"]
         if event in {"BUY", "SELL", "RISK_EXIT"}:
             st.session_state.trades.append(
@@ -82,15 +98,24 @@ if run_step:
             )
     except Exception as exc:
         st.error(f"Step failed: {exc}")
-
-try:
-    preview = client.fetch_ohlcv(runtime_cfg.symbol, runtime_cfg.timeframe, limit=max(100, runtime_cfg.slow_ma + 10))
-    preview = preview.copy()
-    preview["fast_ma"] = preview["close"].rolling(window=runtime_cfg.fast_ma).mean()
-    preview["slow_ma"] = preview["close"].rolling(window=runtime_cfg.slow_ma).mean()
-except Exception as exc:
-    st.error(f"Data fetch failed: {exc}")
-    preview = None
+elif refresh_data or st.session_state.preview_df is None or st.session_state.preview_key != preview_key:
+    try:
+        preview = fetch_preview_cached(
+            source=runtime_cfg.data_source,
+            symbol=runtime_cfg.symbol,
+            timeframe=runtime_cfg.timeframe,
+            limit=max(100, runtime_cfg.slow_ma + 10),
+        ).copy()
+        st.session_state.preview_df = preview
+        st.session_state.preview_key = preview_key
+    except Exception as exc:
+        if "Too Many Requests" in str(exc):
+            st.warning("Provider rate-limited this request. Wait 1-2 minutes and click 'Refresh Data'.")
+        else:
+            st.error(f"Data fetch failed: {exc}")
+        preview = st.session_state.preview_df
+else:
+    preview = st.session_state.preview_df
 
 c1, c2, c3 = st.columns(3)
 c1.metric(f"Cash Balance ({currency_label})", f"{st.session_state.portfolio.usdt_balance:.2f}")
@@ -102,7 +127,10 @@ else:
     c3.metric("Entry", "-")
 
 if preview is not None:
+    preview = preview.copy()
     st.subheader("Recent Candles + Moving Averages")
+    preview["fast_ma"] = preview["close"].rolling(window=runtime_cfg.fast_ma).mean()
+    preview["slow_ma"] = preview["close"].rolling(window=runtime_cfg.slow_ma).mean()
     table_df = preview[["timestamp", "close", "fast_ma", "slow_ma"]].tail(120).copy()
     st.dataframe(table_df, use_container_width=True)
 
